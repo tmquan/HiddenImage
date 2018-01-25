@@ -605,7 +605,7 @@ class Model(GANModelDesc):
 
 
 		piml  = rounded(piml) #
-		# pml   = rounded(pml)
+		pml   = rounded(pml)
 		# plmiml = rounded(plmiml) #
 		# plml   = rounded(plml)
 
@@ -657,8 +657,10 @@ class Model(GANModelDesc):
 
 				gtv_guess = tf.multiply(g_mag_grad_M, thresholded_mag_grad_L, name='gtv_guess')
 				loss_gtv_guess = tf.reduce_mean(gtv_guess, name='loss_gtv_guess')
+				
+				thresholded_mag_grad_L = cvt2tanh(thresholded_mag_grad_L, maxVal=1.0)
 				gtv_guess = cvt2tanh(gtv_guess, maxVal=1.0)
-				return loss_gtv_guess, gtv_guess
+				return loss_gtv_guess, thresholded_mag_grad_L
 
 			label_iml, g_iml = label_loss(None, piml, pim, name='label_iml')
 			# label_lml, g_lml = label_loss(None, plml, plm, name='label_lml')
@@ -721,7 +723,24 @@ class Model(GANModelDesc):
 	def _get_optimizer(self):
 		lr = symbolic_functions.get_scalar_var('learning_rate', 2e-4, summary=True)
 		return tf.train.AdamOptimizer(lr, beta1=0.5, epsilon=1e-3)
+###############################################################################
+class VisualizeRunner(Callback):
+	def _setup_graph(self):
+		self.pred = self.trainer.get_predictor(
+			['image_p', 'membr_p', 'label_p', 'image_u', 'membr_u', 'label_u'], ['viz'])
 
+	def _before_train(self):
+		global args
+		self.test_ds = get_data(args.data, isTrain=False, isValid=False, isTest=True)
+
+	def _trigger(self):
+		for lst in self.test_ds.get_data():
+			viz_test = self.pred(lst)
+			viz_test = np.squeeze(np.array(viz_test))
+
+			#print viz_test.shape
+
+			self.trainer.monitors.put_image('viz_test', viz_test)
 ###############################################################################
 def get_data(dataDir, isTrain=False, isValid=False, isTest=False):
 	# Process the directories 
@@ -821,8 +840,9 @@ if __name__ == '__main__':
 				ClipCallback(),
 				ScheduledHyperParamSetter('learning_rate', 
 					[(0, 2e-4), (100, 1e-4), (200, 2e-5), (300, 1e-5), (400, 2e-6), (500, 1e-6)], interp='linear'),
+				PeriodicTrigger(VisualizeRunner(), every_k_epochs=5),
 				],
 			session_init=SaverRestore(args.load) if args.load else None, 
 			steps_per_epoch=data_set.size(),
-			max_epoch=300
+			max_epoch=300, 
 		)
