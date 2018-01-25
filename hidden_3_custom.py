@@ -53,7 +53,7 @@ DIMY  = 512
 DIMZ  = 1
 DIMC  = 1
 
-MAX_LABEL = 64.0
+MAX_LABEL = 320
 ###############################################################################
 def magnitute_central_difference(image, name=None):
 	from tensorflow.python.framework import ops
@@ -498,7 +498,19 @@ class Model(GANModelDesc):
 		um = cvt2tanh(um)
 		ul = cvt2tanh(ul)
 
-		
+		def label2edge(y_pred_L, y_grad_M, name='label2edge'):
+			mag_grad_L   = magnitute_central_difference(y_pred_L, name='mag_grad_L')
+			cond = tf.greater(mag_grad_L, tf.zeros_like(mag_grad_L))
+			thresholded_mag_grad_L = tf.where(cond, 
+									   tf.zeros_like(mag_grad_L), 
+									   tf.ones_like(mag_grad_L), 
+									   name='thresholded_mag_grad_L')
+
+
+			
+			thresholded_mag_grad_L = cvt2tanh(thresholded_mag_grad_L, maxVal=1.0)
+			return  thresholded_mag_grad_L
+
 		with argscope([Conv2D, Deconv2D, FullyConnected],
 					  W_init=tf.truncated_normal_initializer(stddev=0.02),
 					  use_bias=False), \
@@ -516,16 +528,23 @@ class Model(GANModelDesc):
 					piml  = self.generator(pim)
 					pml   = self.generator(pm)
 				with tf.variable_scope('L2M'):
-					pimlm = self.generator(piml) #
-					plm   = self.generator(pl)
-					pmlm  = self.generator(pml)
+					# pimlm = self.generator(piml) #
+					# plm   = self.generator(pl)
+					# pmlm  = self.generator(pml)
+					with freeze_variables():
+						pimlm = label2edge(piml, name='pimlm') #
+						plm   = label2edge(pl, name='plm')
+						pmlm  = label2edge(pml, name='pmlm')
 				with tf.variable_scope('M2I'):
 					pimlmi = self.generator(pimlm) #
 					pimi   = self.generator(pim)
+					# pmlmi  = self.generator(pmlm)
 
 				# Real pair label 4 gen
 				with tf.variable_scope('L2M'):
-					plm = self.generator(pl)
+					# plm = self.generator(pl)
+					with freeze_variables():
+						plm = label2edge(pl, name='plm') #
 				with tf.variable_scope('M2I'):
 					plmi = self.generator(plm)
 					pmi  = self.generator(pi)
@@ -537,19 +556,19 @@ class Model(GANModelDesc):
 				with tf.variable_scope('M2L'):
 					plmiml = self.generator(plmim) #
 					plml   = self.generator(plm)
-	
+					# pmiml  = self.generator(pmim)
 
 			with tf.variable_scope('discrim'):
 				with tf.variable_scope('I'):
-					i_dis_real = self.discriminator(ui)
-					i_dis_fake = self.discriminator(pimi)
+					i_dis_real 			  = self.discriminator(ui)
+					i_dis_fake_from_label = self.discriminator(plmi)
 				with tf.variable_scope('M'):
 					m_dis_real 			  = self.discriminator(um)
 					m_dis_fake_from_image = self.discriminator(pim)
 					m_dis_fake_from_label = self.discriminator(plm)
 				with tf.variable_scope('L'):
-					l_dis_real = self.discriminator(ul)
-					l_dis_fake = self.discriminator(plml)
+					l_dis_real 			  = self.discriminator(ul)
+					l_dis_fake_from_image = self.discriminator(piml)
 
 		def rounded(label, factor = MAX_LABEL, name='quantized'):
 			with G.gradient_override_map({"Round": "Identity"}):
@@ -584,8 +603,8 @@ class Model(GANModelDesc):
 			recon_lm 		= tf.reduce_mean(tf.abs((pm) - (plm)), name='recon_lm')
 			
 		with tf.name_scope('GAN_loss'):
-			G_loss_II, D_loss_II = self.build_losses(i_dis_real, i_dis_fake, name='II')
-			G_loss_LL, D_loss_LL = self.build_losses(l_dis_real, l_dis_fake, name='LL')
+			G_loss_IL, D_loss_IL = self.build_losses(i_dis_real, i_dis_fake_from_label, name='IL')
+			G_loss_LI, D_loss_LI = self.build_losses(l_dis_real, l_dis_fake_from_image, name='IL')
 			G_loss_MI, D_loss_MI = self.build_losses(m_dis_real, m_dis_fake_from_image, name='MI')
 			G_loss_ML, D_loss_ML = self.build_losses(m_dis_real, m_dis_fake_from_label, name='ML')
 
@@ -625,12 +644,12 @@ class Model(GANModelDesc):
 		self.g_loss = tf.add_n([(recon_imi + recon_lmi + recon_imlmi), #
 								(recon_lml + recon_iml + recon_lmiml), #
 								(recon_mim + recon_mlm + recon_im  + recon_lm),
-								(G_loss_II + G_loss_LL + G_loss_MI + G_loss_ML), 
+								(G_loss_IL + G_loss_LI + G_loss_MI + G_loss_ML), 
 								(membr_im + membr_lm + membr_imlm + membr_lmim + membr_mlm + membr_mim),
 								(label_iml + label_lml + label_lmiml + label_ml)
 								], name='G_loss_total')
 		self.d_loss = tf.add_n([
-								(D_loss_II + D_loss_LL + D_loss_MI + D_loss_ML), 
+								(D_loss_IL + D_loss_LI + D_loss_MI + D_loss_ML), 
 								], name='D_loss_total')
 
 		wd_g = regularize_cost('gen/.*/W', 		l2_regularizer(1e-5), name='G_regularize')

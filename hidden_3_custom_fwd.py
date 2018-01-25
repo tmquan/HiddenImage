@@ -53,7 +53,7 @@ DIMY  = 512
 DIMZ  = 1
 DIMC  = 1
 
-MAX_LABEL = 64.0
+MAX_LABEL = 320
 ###############################################################################
 def magnitute_central_difference(image, name=None):
 	from tensorflow.python.framework import ops
@@ -590,17 +590,15 @@ class Model(GANModelDesc):
 
 			with tf.variable_scope('discrim'):
 				# with tf.variable_scope('I'):
-				# 	i_dis_real = self.discriminator(ui)
-				# 	i_dis_fake = self.discriminator(pimi)
+				# 	i_dis_real 			  = self.discriminator(ui)
+				# 	i_dis_fake_from_label = self.discriminator(plmi)
 				with tf.variable_scope('M'):
 					m_dis_real 			  = self.discriminator(um)
 					m_dis_fake_from_image = self.discriminator(pim)
 					# m_dis_fake_from_label = self.discriminator(plm)
 				with tf.variable_scope('L'):
-					l_dis_real = self.discriminator(ul)
-					# l_dis_fake = self.discriminator(plml)
-					l_dis_fake = self.discriminator(piml)
-
+					l_dis_real 			  = self.discriminator(ul)
+					l_dis_fake_from_image = self.discriminator(piml)
 		
 
 
@@ -628,8 +626,8 @@ class Model(GANModelDesc):
 			# recon_lm 		= tf.reduce_mean(tf.abs((pm) - (plm)), name='recon_lm')
 			
 		with tf.name_scope('GAN_loss'):
-			# G_loss_II, D_loss_II = self.build_losses(i_dis_real, i_dis_fake, name='II')
-			G_loss_LL, D_loss_LL = self.build_losses(l_dis_real, l_dis_fake, name='LL')
+			# G_loss_IL, D_loss_IL = self.build_losses(i_dis_real, i_dis_fake_from_label, name='IL')
+			G_loss_LI, D_loss_LI = self.build_losses(l_dis_real, l_dis_fake_from_image, name='LL')
 			G_loss_MI, D_loss_MI = self.build_losses(m_dis_real, m_dis_fake_from_image, name='MI')
 			# G_loss_ML, D_loss_ML = self.build_losses(m_dis_real, m_dis_fake_from_label, name='ML')
 
@@ -657,7 +655,7 @@ class Model(GANModelDesc):
 
 				gtv_guess = tf.multiply(g_mag_grad_M, thresholded_mag_grad_L, name='gtv_guess')
 				loss_gtv_guess = tf.reduce_mean(gtv_guess, name='loss_gtv_guess')
-				
+
 				thresholded_mag_grad_L = cvt2tanh(thresholded_mag_grad_L, maxVal=1.0)
 				gtv_guess = cvt2tanh(gtv_guess, maxVal=1.0)
 				return loss_gtv_guess, thresholded_mag_grad_L
@@ -670,15 +668,15 @@ class Model(GANModelDesc):
 								#(recon_imi), # + recon_lmi + recon_imlmi), #
 								(recon_iml), # + recon_lml + recon_lmiml), #
 								(recon_im), #  + recon_lm + recon_mim + recon_mlm),
-								# (G_loss_II + G_loss_LL + G_loss_MI + G_loss_ML), 
-								(G_loss_LL + G_loss_MI), 
+								# (G_loss_IL + G_loss_LI + G_loss_MI + G_loss_ML), 
+								(G_loss_LI + G_loss_MI), 
 								(membr_im), # + membr_lm + membr_imlm + membr_lmim + membr_mlm + membr_mim),
 								# (label_iml + label_lml + label_lmiml + label_ml)
 								(label_iml + label_ml)
 								], name='G_loss_total')
 		self.d_loss = tf.add_n([
-								# (D_loss_II + D_loss_LL + D_loss_MI + D_loss_ML), 
-								(D_loss_LL + D_loss_MI), 
+								# (D_loss_IL + D_loss_LI + D_loss_MI + D_loss_ML), 
+								(D_loss_LI + D_loss_MI), 
 								], name='D_loss_total')
 
 		wd_g = regularize_cost('gen/.*/W', 		l2_regularizer(1e-5), name='G_regularize')
