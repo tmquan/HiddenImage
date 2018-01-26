@@ -498,7 +498,7 @@ class Model(GANModelDesc):
 		um = cvt2tanh(um)
 		ul = cvt2tanh(ul)
 
-		def label2edge(y_pred_L, y_grad_M, name='label2edge'):
+		def label2edge(y_pred_L, name='label2edge'):
 			mag_grad_L   = magnitute_central_difference(y_pred_L, name='mag_grad_L')
 			cond = tf.greater(mag_grad_L, tf.zeros_like(mag_grad_L))
 			thresholded_mag_grad_L = tf.where(cond, 
@@ -507,7 +507,12 @@ class Model(GANModelDesc):
 									   name='thresholded_mag_grad_L')
 
 
-			
+			# thresholded_mag_grad_L[y_pred_L==-1] = 0
+			cond = tf.equal(y_pred_L, -1*tf.ones_like(y_pred_L))
+			thresholded_mag_grad_L = tf.where(cond, 
+										   tf.zeros_like(thresholded_mag_grad_L), 
+										   thresholded_mag_grad_L, 
+										   name='thresholded_mag_grad_L')
 			thresholded_mag_grad_L = cvt2tanh(thresholded_mag_grad_L, maxVal=1.0)
 			return  thresholded_mag_grad_L
 
@@ -528,13 +533,13 @@ class Model(GANModelDesc):
 					piml  = self.generator(pim)
 					pml   = self.generator(pm)
 				with tf.variable_scope('L2M'):
-					# pimlm = self.generator(piml) #
-					# plm   = self.generator(pl)
-					# pmlm  = self.generator(pml)
-					with freeze_variables():
-						pimlm = label2edge(piml, name='pimlm') #
-						plm   = label2edge(pl, name='plm')
-						pmlm  = label2edge(pml, name='pmlm')
+					pimlm = self.generator(piml) #
+					plm   = self.generator(pl)
+					pmlm  = self.generator(pml)
+					# with freeze_variables():
+					# 	pimlm = label2edge(piml, name='pimlm') #
+					# 	plm   = label2edge(pl, name='plm')
+					# 	pmlm  = label2edge(pml, name='pmlm')
 				with tf.variable_scope('M2I'):
 					pimlmi = self.generator(pimlm) #
 					pimi   = self.generator(pim)
@@ -542,9 +547,9 @@ class Model(GANModelDesc):
 
 				# Real pair label 4 gen
 				with tf.variable_scope('L2M'):
-					# plm = self.generator(pl)
-					with freeze_variables():
-						plm = label2edge(pl, name='plm') #
+					plm = self.generator(pl)
+					# with freeze_variables():
+					# 	plm = label2edge(pl, name='plm') #
 				with tf.variable_scope('M2I'):
 					plmi = self.generator(plm)
 					pmi  = self.generator(pi)
