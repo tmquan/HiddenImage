@@ -48,11 +48,11 @@ SHAPE = 256
 BATCH = 1
 TEST_BATCH = 100
 EPOCH_SIZE = 100
-NB_FILTERS = 32  # channel size
+NB_FILTERS = 16  # channel size
 
-DIMX  = 512
-DIMY  = 512
-DIMZ  = 1
+DIMX  = 1024
+DIMY  = 1024
+DIMZ  = 3
 DIMC  = 1
 
 MAX_LABEL = 320
@@ -855,7 +855,7 @@ if __name__ == '__main__':
 			trainer = MultiGPUGANTrainer(nr_tower, data_set, model)
 		trainer.train_with_defaults(
 			callbacks=[
-				PeriodicTrigger(ModelSaver(), every_k_epochs=50),
+				# PeriodicTrigger(ModelSaver(), every_k_epochs=20),
 				ClipCallback(),
 				ScheduledHyperParamSetter('learning_rate', 
 					[(0, 2e-4), (100, 1e-4), (200, 2e-5), (300, 1e-5), (400, 2e-6), (500, 1e-6)], interp='linear'),
@@ -863,5 +863,5 @@ if __name__ == '__main__':
 				],
 			session_init=SaverRestore(args.load) if args.load else None, 
 			steps_per_epoch=data_set.size(),
-			max_epoch=1000, 
+			max_epoch=300, 
 		)

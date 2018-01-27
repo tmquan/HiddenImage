@@ -185,7 +185,7 @@ def arch_generator(img, last_dim=1):
 		d0 = residual_dec('d0', d1+e0, NB_FILTERS*1) 
 		dd =  (LinearWrap(d0)
 				.Conv2D('convlast', last_dim, kernel_shape=3, stride=1, padding='SAME', nl=tf.tanh, use_bias=True) ())
-		return dd
+		return dd, d0
 
 @auto_reuse_variable_scope
 def arch_discriminator(img):
@@ -553,10 +553,10 @@ class Model(GANModelDesc):
 			with tf.variable_scope('gen'):
 				# Real pair image 4 gen
 				with tf.variable_scope('I2M'):
-					pim = self.generator(pi)
+					pim, feat_im = self.generator(pi)
 				with tf.variable_scope('M2L'):
-					piml  = self.generator(pim)
-					pml   = self.generator(pm)
+					piml, feat_iml  = self.generator(pim)
+					pml, feat_ml   = self.generator(pm)
 					# piml  = tf.py_func(tf_label, [(pim)], tf.float32)
 					# pml   = tf.py_func(tf_label, [(pm)], tf.float32)
 					# print pim
@@ -677,6 +677,84 @@ class Model(GANModelDesc):
 			rand_iml = tf.reduce_mean(tf.cast(tf.py_func (tf_rand_score, [piml, pl], tf.float64), tf.float32))
 			rand_ml  = tf.reduce_mean(tf.cast(tf.py_func (tf_rand_score, [pml,  pl], tf.float64), tf.float32))
 
+		with tf.name_scope('discrim_loss'):
+			def regDLF(y_true, y_pred, alpha=1, beta=1, gamma=0.01, delta_v=0.5, delta_d=1.5, name='loss_discrim'):
+				def tf_norm(inputs, axis=1, epsilon=1e-7,  name='safe_norm'):
+					squared_norm 	= tf.reduce_sum(tf.square(inputs), axis=axis, keep_dims=True)
+					safe_norm 		= tf.sqrt(squared_norm+epsilon)
+					return tf.identity(safe_norm, name=name)
+				###
+				y_true = tf.reshape(y_true, [DIMZ*DIMY*DIMX])
+
+				nDim = tf.shape(y_pred)[-1]
+				X = tf.reshape(y_pred, [DIMZ*DIMY*DIMX, nDim])
+				uniqueLabels, uniqueInd = tf.unique(y_true)
+
+				numUnique = tf.size(uniqueLabels) # Get the number of connected component
+
+				Sigma = tf.unsorted_segment_sum(X, uniqueInd, numUnique)
+				# ones_Sigma = tf.ones((tf.shape(X)[0], 1))
+				ones_Sigma = tf.ones_like(X)
+				ones_Sigma = tf.unsorted_segment_sum(ones_Sigma, uniqueInd, numUnique)
+				mu = tf.divide(Sigma, ones_Sigma)
+
+				Lreg = tf.reduce_mean(tf.norm(mu, axis=1, ord=1))
+
+				T = tf.norm(tf.subtract(tf.gather(mu, uniqueInd), X), axis = 1, ord=1)
+				T = tf.divide(T, Lreg)
+				T = tf.subtract(T, delta_v)
+				T = tf.clip_by_value(T, 0, T)
+				T = tf.square(T)
+
+				ones_Sigma = tf.ones_like(uniqueInd, dtype=tf.float32)
+				ones_Sigma = tf.unsorted_segment_sum(ones_Sigma, uniqueInd, numUnique)
+				clusterSigma = tf.unsorted_segment_sum(T, uniqueInd, numUnique)
+				clusterSigma = tf.divide(clusterSigma, ones_Sigma)
+
+				# Lvar = tf.reduce_mean(clusterSigma, axis=0)
+				Lvar = tf.reduce_mean(clusterSigma)
+
+				mu_interleaved_rep = tf.tile(mu, [numUnique, 1])
+				mu_band_rep = tf.tile(mu, [1, numUnique])
+				mu_band_rep = tf.reshape(mu_band_rep, (numUnique*numUnique, nDim))
+
+				mu_diff = tf.subtract(mu_band_rep, mu_interleaved_rep)
+						# Remove zero vector
+						# intermediate_tensor = reduce_sum(tf.abs(x), 1)
+						# zero_vector = tf.zeros(shape=(1,1), dtype=tf.float32)
+						# bool_mask = tf.not_equal(intermediate_tensor, zero_vector)
+						# omit_zeros = tf.boolean_mask(x, bool_mask)
+				intermediate_tensor = tf.reduce_sum(tf.abs(mu_diff), 1)
+				zero_vector = tf.zeros(shape=(1,1), dtype=tf.float32)
+				bool_mask = tf.not_equal(intermediate_tensor, zero_vector)
+				omit_zeros = tf.boolean_mask(mu_diff, bool_mask)
+				mu_diff = tf.expand_dims(omit_zeros, axis=1)
+				print mu_diff
+				mu_diff = tf.norm(mu_diff, ord=1)
+						# squared_norm = tf.reduce_sum(tf.square(s), axis=axis,keep_dims=True)
+						# safe_norm = tf.sqrt(squared_norm + epsilon)
+						# squared_norm = tf.reduce_sum(tf.square(omit_zeros), axis=-1,keep_dims=True)
+						# safe_norm = tf.sqrt(squared_norm + 1e-6)
+						# mu_diff = safe_norm
+
+				mu_diff = tf.divide(mu_diff, Lreg)
+
+				mu_diff = tf.subtract(2*delta_d, mu_diff)
+				mu_diff = tf.clip_by_value(mu_diff, 0, mu_diff)
+				mu_diff = tf.square(mu_diff)
+
+				numUniqueF = tf.cast(numUnique, tf.float32)
+				Ldist = tf.reduce_mean(mu_diff)        
+
+				L = alpha * Lvar + beta * Ldist + gamma * Lreg
+				print L
+				print Ldist
+				print Lvar
+				print Lreg
+				return tf.squeeze(L, name=name)
+			discrim_im  = regDLF(cvt2imag(pm, maxVal=1.0), feat_im, name='discrim_im')
+			discrim_iml = regDLF(cvt2imag(piml, maxVal=MAX_LABEL), feat_iml, name='discrim_iml')
+			discrim_ml  = regDLF(cvt2imag(pml, maxVal=MAX_LABEL), feat_ml, name='discrim_ml')
 
 		self.g_loss = tf.add_n([
 								#(recon_imi), # + recon_lmi + recon_imlmi), #
@@ -686,6 +764,7 @@ class Model(GANModelDesc):
 								(rand_ml), #  + rand_lm + rand_mim + rand_mlm),
 								# (G_loss_IL + G_loss_LI + G_loss_MI + G_loss_ML), 
 								(G_loss_LI + G_loss_MI), 
+								(discrim_im + discrim_iml + discrim_ml), 
 								(membr_im), # + membr_lm + membr_imlm + membr_lmim + membr_mlm + membr_mim),
 								# (label_iml + label_lml + label_lmiml + label_ml)
 								(label_iml + label_ml)
