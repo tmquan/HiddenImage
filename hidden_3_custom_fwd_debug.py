@@ -376,7 +376,7 @@ class ImageDataFlow(RNGDataFlow):
 		assert ((image.ndim == 2) | (image.ndim == 3))
 		if seed:
 			np.random.seed(seed)
-			random_flip = np.random.randint(1,5)
+		random_flip = np.random.randint(1,5)
 		if random_flip==1:
 			flipped = image[...,::1,::-1]
 			image = flipped
@@ -753,8 +753,8 @@ class Model(GANModelDesc):
 				print Lreg
 				return tf.squeeze(L, name=name)
 			discrim_im  = regDLF(cvt2imag(pm, maxVal=1.0), feat_im, name='discrim_im')
-			discrim_iml = regDLF(cvt2imag(piml, maxVal=MAX_LABEL), feat_iml, name='discrim_iml')
-			discrim_ml  = regDLF(cvt2imag(pml, maxVal=MAX_LABEL), feat_ml, name='discrim_ml')
+			discrim_iml = regDLF(cvt2imag(pl, maxVal=MAX_LABEL), feat_iml, name='discrim_iml')
+			discrim_ml  = regDLF(cvt2imag(pl, maxVal=MAX_LABEL), feat_ml, name='discrim_ml')
 
 		self.g_loss = tf.add_n([
 								#(recon_imi), # + recon_lmi + recon_imlmi), #

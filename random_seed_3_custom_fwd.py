@@ -55,7 +55,7 @@ DIMY  = 512
 DIMZ  = 3
 DIMC  = 1
 
-MAX_LABEL = 320
+MAX_LABEL = 1.0
 ###############################################################################
 def magnitute_central_difference(image, name=None):
 	from tensorflow.python.framework import ops
@@ -313,21 +313,21 @@ class ImageDataFlow(RNGDataFlow):
 				label_p = self.random_square_rotate(label_p, seed=seed)   
 				label_p = self.random_elastic(label_p, seed=seed)
 				
-				# Augment the unpair image for different seed seed
-				image_u = self.random_flip(image_u, seed=seed_image)        
-				image_u = self.random_reverse(image_u, seed=seed_image)
-				image_u = self.random_square_rotate(image_u, seed=seed_image)           
-				image_u = self.random_elastic(image_u, seed=seed_image)
+			# 	# Augment the unpair image for different seed seed
+			# 	image_u = self.random_flip(image_u, seed=seed_image)        
+			# 	image_u = self.random_reverse(image_u, seed=seed_image)
+			# 	image_u = self.random_square_rotate(image_u, seed=seed_image)           
+			# 	image_u = self.random_elastic(image_u, seed=seed_image)
 
-				membr_u = self.random_flip(membr_u, seed=seed_membr)        
-				membr_u = self.random_reverse(membr_u, seed=seed_membr)
-				membr_u = self.random_square_rotate(membr_u, seed=seed_membr)   
-				membr_u = self.random_elastic(membr_u, seed=seed_membr)
+			# 	membr_u = self.random_flip(membr_u, seed=seed_membr)        
+			# 	membr_u = self.random_reverse(membr_u, seed=seed_membr)
+			# 	membr_u = self.random_square_rotate(membr_u, seed=seed_membr)   
+			# 	membr_u = self.random_elastic(membr_u, seed=seed_membr)
 
-				label_u = self.random_flip(label_u, seed=seed_label)        
-				label_u = self.random_reverse(label_u, seed=seed_label)
-				label_u = self.random_square_rotate(label_u, seed=seed_label)   
-				label_u = self.random_elastic(label_u, seed=seed_label)
+			# 	label_u = self.random_flip(label_u, seed=seed_label)        
+			# 	label_u = self.random_reverse(label_u, seed=seed_label)
+			# 	label_u = self.random_square_rotate(label_u, seed=seed_label)   
+			# 	label_u = self.random_elastic(label_u, seed=seed_label)
 
 
 			# Calculate membrane
@@ -346,14 +346,14 @@ class ImageDataFlow(RNGDataFlow):
 			label_p, nb_labels_p = skimage.measure.label(label_p.copy(), return_num=True)
 			label_u, nb_labels_u = skimage.measure.label(label_u.copy(), return_num=True)
 
-			label_p = label_p.astype(np.float32)
-			label_u = label_u.astype(np.float32)
+			# label_p = label_p.astype(np.float32)
+			# label_u = label_u.astype(np.float32)
 
-			label_p = np_2tanh(label_p, maxVal=MAX_LABEL)
-			label_u = np_2tanh(label_u, maxVal=MAX_LABEL)
+			# label_p = np_2tanh(label_p, maxVal=MAX_LABEL)
+			# label_u = np_2tanh(label_u, maxVal=MAX_LABEL)
 
-			label_p = np_2imag(label_p, maxVal=255.0)
-			label_u = np_2imag(label_u, maxVal=255.0)
+			# label_p = np_2imag(label_p, maxVal=255.0)
+			# label_u = np_2imag(label_u, maxVal=255.0)
 
 			#Expand dim to make single channel
 			image_p = np.expand_dims(image_p, axis=-1)
@@ -364,12 +364,46 @@ class ImageDataFlow(RNGDataFlow):
 			membr_u = np.expand_dims(membr_u, axis=-1)
 			label_u = np.expand_dims(label_u, axis=-1)
 
+			# Calculate seed map
+			seed_z = np.random.randint(0, DIMZ)
+			seed_y = np.random.randint(0, DIMY)
+			seed_x = np.random.randint(0, DIMX)
+
+			seed_map = np.zeros_like(label_u)
+			seed_map[seed_z, seed_y, seed_x] = 1
+
+			# replace the seed by distance transform
+			from scipy.ndimage.morphology import distance_transform_edt 
+			seed_map = distance_transform_edt(1-seed_map)
+			seed_map = seed_map - seed_map.min()
+			seed_map = seed_map / seed_map.max()
+			seed_map = 1.0 - seed_map
+
+			# label_val = label[seed_z, seed_y, seed_x]		
+			# next_map = np.zeros_like(label)
+			# next_map[label==label_val]	= 1
+			def assign_label(label_map, seed_z=0, seed_y=0, seed_x=0):
+				label_val= label_map[seed_z, seed_y, seed_x]
+				final_map = np.zeros_like(label_map)
+				final_map[label_map==label_val] = 1
+				final_map = final_map*255
+				return final_map
+
+			label_p = assign_label(label_p.copy(), seed_z, seed_y, seed_x)
+			label_u = assign_label(label_u.copy(), seed_z, seed_y, seed_x)
+
+			label_p[membr_p==0] = 0
+			label_u[membr_u==0] = 0
+
+			seed_map = 255*seed_map
+
 			yield [image_p.astype(np.float32), 
 				   membr_p.astype(np.float32), 
 				   label_p.astype(np.float32), 
-				   image_u.astype(np.float32), 
-				   membr_u.astype(np.float32), 
-				   label_u.astype(np.float32),
+				   image_p.astype(np.float32), 
+				   membr_p.astype(np.float32), 
+				   label_p.astype(np.float32),
+				   seed_map.astype(np.float32),
 				   ] 
 
 	def random_flip(self, image, seed=None):
@@ -480,6 +514,7 @@ class Model(GANModelDesc):
 			InputDesc(tf.float32, (DIMZ, DIMY, DIMX, 1), 'image_u'),
 			InputDesc(tf.float32, (DIMZ, DIMY, DIMX, 1), 'membr_u'),
 			InputDesc(tf.float32, (DIMZ, DIMY, DIMX, 1), 'label_u'),
+			InputDesc(tf.float32, (DIMZ, DIMY, DIMX, 1), 'seed_map'),
 			]
 	def build_losses(self, vecpos, vecneg, name="WGAN_loss"):
 		with tf.name_scope(name=name):
@@ -493,40 +528,15 @@ class Model(GANModelDesc):
 		G = tf.get_default_graph() # For round
 		tf.local_variables_initializer()
 		tf.global_variables_initializer()
-		pi, pm, pl, ui, um, ul = inputs
+		pi, pm, pl, ui, um, ul, sm = inputs
 		pi = cvt2tanh(pi)
 		pm = cvt2tanh(pm)
 		pl = cvt2tanh(pl)
 		ui = cvt2tanh(ui)
 		um = cvt2tanh(um)
 		ul = cvt2tanh(ul)
+		sm = cvt2tanh(sm)
 
-
-		# def tf_membr(label):
-		# 	with freeze_variables():
-		# 		label = np_2imag(label, maxVal=MAX_LABEL)
-		# 		label = np.squeeze(label) # Unimplemented: exceptions.NotImplementedError: Only for images of dimension 1-3 are supported, got a 4D one
-		# 		# label, nb_labels = skimage.measure.label(color, return_num=True)
-		# 		# label = np.expand_dims(label, axis=-1).astype(np.float32) # Modify here for batch
-		# 		# for z in range(membr.shape[0]):
-		# 		# 	membr[z,...] = 1-skimage.segmentation.find_boundaries(np.squeeze(label[z,...]), mode='thick') #, mode='inner'
-		# 		membr = 1-skimage.segmentation.find_boundaries(np.squeeze(label), mode='thick') #, mode='inner'
-		# 		membr = np.expand_dims(membr, axis=-1).astype(np.float32)
-		# 		membr = np.expand_dims(membr, axis=0).astype(np.float32)
-		# 		membr = np_2tanh(membr, maxVal=1.0)
-		# 		membr = np.reshape(membr, label.shape)
-		# 		return membr
-		
-		# def tf_label(color):
-		# 	with freeze_variables():
-		# 		color = np_2imag(color, maxVal=MAX_LABEL)
-		# 		color = np.squeeze(color) # Unimplemented: exceptions.NotImplementedError: Only for images of dimension 1-3 are supported, got a 4D one
-		# 		label, nb_labels = skimage.measure.label(color, return_num=True)
-		# 		label = np.expand_dims(label, axis=-1).astype(np.float32)
-		# 		label = np.expand_dims(label, axis=0).astype(np.float32)
-		# 		label = np_2tanh(label, maxVal=MAX_LABEL)
-		# 		label = np.reshape(label, color.shape)
-		# 		return label
 
 		def tf_rand_score (x1, x2):
 			return np.mean(1.0 - adjusted_rand_score (x1.flatten (), x2.flatten ()))
@@ -555,44 +565,9 @@ class Model(GANModelDesc):
 				with tf.variable_scope('I2M'):
 					pim, feat_im = self.generator(pi)
 				with tf.variable_scope('M2L'):
-					piml, feat_iml  = self.generator(pim)
-					pml, feat_ml   = self.generator(pm)
-					# piml  = tf.py_func(tf_label, [(pim)], tf.float32)
-					# pml   = tf.py_func(tf_label, [(pm)], tf.float32)
-					# print pim
-					# print piml
-				# with tf.variable_scope('L2M'):
-				# # with freeze_variables():
-				# 	pimlm = self.generator(piml) #
-				# 	plm   = self.generator(pl)
-				# 	pmlm  = self.generator(pml)		
-				# 	# pimlm = tf.py_func(tf_membr, [(piml)], tf.float32) #
-				# 	# plm   = tf.py_func(tf_membr, [(pl)	], tf.float32)
-				# 	# pmlm  = tf.py_func(tf_membr, [(pml)	], tf.float32)
-				# 	# print piml
-				# 	# print pimlm
-				# with tf.variable_scope('M2I'):
-				# 	pimlmi = self.generator(pimlm) #
-				# 	pimi   = self.generator(pim)
-
-				# # Real pair label 4 gen
-				# with tf.variable_scope('L2M'):
-				# # with freeze_variables():
-				# 	plm = self.generator(pl)
-				# 	# plm  = tf.py_func(tf_membr, [(pl)	, tf.float32])
-				# with tf.variable_scope('M2I'):
-				# 	plmi = self.generator(plm)
-				# 	pmi  = self.generator(pi)
-				# with tf.variable_scope('I2M'):
-				# 	plmim = self.generator(plmi) #
-				# 	pim   = self.generator(pi)
-				# 	pmim  = self.generator(pmi)
-
-				# with tf.variable_scope('M2L'):
-				# 	plmiml = self.generator(plmim) #
-				# 	plml   = self.generator(plm)
-				# 	# plmiml = tf.py_func(tf_label, [(plmim)], tf.float32)
-				# 	# plml   = tf.py_func(tf_label, [(plm)], tf.float32)
+					piml, feat_iml  = self.generator(tf.concat([pim, sm], axis=-1))
+					pml, feat_ml    = self.generator(tf.concat([pm, sm], axis=-1))
+					
 
 			with tf.variable_scope('discrim'):
 				# with tf.variable_scope('I'):
@@ -608,33 +583,22 @@ class Model(GANModelDesc):
 		
 
 
-		piml  = rounded(piml) #
-		pml   = rounded(pml)
-		# plmiml = rounded(plmiml) #
-		# plml   = rounded(plml)
-
-
-		# with tf.name_scope('Recon_I_loss'):
-		# 	recon_imi 		= tf.reduce_mean(tf.abs((pi) - (pimi)), name='recon_imi')
-		# 	recon_lmi 		= tf.reduce_mean(tf.abs((pi) - (plmi)), name='recon_lmi')
-		# 	recon_imlmi 	= tf.reduce_mean(tf.abs((pi) - (pimlmi)), name='recon_imlmi') #
+		# piml  = rounded(piml) #
+		# pml   = rounded(pml)
+		
 
 		with tf.name_scope('Recon_L_loss'):
-			# recon_lml 		= tf.reduce_mean(tf.abs((pl) - (plml)), name='recon_lml')
 			recon_iml 		= tf.reduce_mean(tf.abs((pl) - (piml)), name='recon_iml')
 			recon_ml 		= tf.reduce_mean(tf.abs((pl) - (pml)), name='recon_ml')
-			# recon_lmiml 	= tf.reduce_mean(tf.abs((pl) - (plmiml)), name='recon_lmiml') #
+			
 
 		with tf.name_scope('Recon_M_loss'):
-			# recon_mim 		= tf.reduce_mean(tf.abs((pm) - (pmim)), name='recon_mim')
-			# recon_mlm 		= tf.reduce_mean(tf.abs((pm) - (pmlm)), name='recon_mlm')
-
 			recon_im 		= tf.reduce_mean(tf.abs((pm) - (pim)), name='recon_im')
-			# recon_lm 		= tf.reduce_mean(tf.abs((pm) - (plm)), name='recon_lm')
+			
 			
 		with tf.name_scope('GAN_loss'):
 			# G_loss_IL, D_loss_IL = self.build_losses(i_dis_real, i_dis_fake_from_label, name='IL')
-			G_loss_LI, D_loss_LI = self.build_losses(l_dis_real, l_dis_fake_from_image, name='LL')
+			G_loss_IL, D_loss_IL = self.build_losses(l_dis_real, l_dis_fake_from_image, name='IL')
 			G_loss_MI, D_loss_MI = self.build_losses(m_dis_real, m_dis_fake_from_image, name='MI')
 			# G_loss_ML, D_loss_ML = self.build_losses(m_dis_real, m_dis_fake_from_label, name='ML')
 
@@ -645,13 +609,10 @@ class Model(GANModelDesc):
 								   dice_coe(cvt2imag(y_true, maxVal=1.0), cvt2imag(y_pred, maxVal=1.0), axis=[1,2,3], loss_type='jaccard')))
 				# loss = tf.reshape(loss, [-1])
 				return tf.identity(loss, name=name)
-			membr_im = membr_loss(pm, pim, name='membr_im')
-			# print membr_im
-			# membr_lm = membr_loss(pm, plm, name='membr_lm')
-			# membr_imlm = membr_loss(pm, pimlm, name='membr_imlm')
-			# membr_lmim = membr_loss(pm, plmim, name='membr_lmim')
-			# membr_mlm = membr_loss(pm, pmlm, name='membr_mlm')
-			# membr_mim = membr_loss(pm, pmim, name='membr_mim')
+			membr_im  = membr_loss(pm, pim, name='membr_im')
+			membr_iml = membr_loss(pl, piml, name='membr_iml')
+			membr_ml  = membr_loss(pl, pml, name='membr_ml')
+			
 		# custom loss for label
 		with tf.name_scope('label_loss'):
 			def label_loss(y_true_L, y_pred_L, y_grad_M, name='label_loss'):
@@ -671,8 +632,6 @@ class Model(GANModelDesc):
 				return tf.identity(loss_gtv_guess, name=name), thresholded_mag_grad_L
 
 			label_iml, g_iml = label_loss(None, piml, pim, name='label_iml')
-			# label_lml, g_lml = label_loss(None, plml, plm, name='label_lml')
-			# label_lmiml, g_lmiml = label_loss(None, plmiml, plmim, name='label_lmiml')
 			label_ml,  g_ml  = label_loss(None, pml,  pm,  name='label_loss_ml')
 
 		# custom loss for tf_rand_score
@@ -759,8 +718,8 @@ class Model(GANModelDesc):
 				return tf.identity(L,  name=name)
 
 			discrim_im  = regDLF(cvt2imag(pm, maxVal=1.0), feat_im, name='discrim_im')
-			discrim_iml = regDLF(cvt2imag(pl, maxVal=MAX_LABEL), feat_iml, name='discrim_iml')
-			discrim_ml  = regDLF(cvt2imag(pl, maxVal=MAX_LABEL), feat_ml, name='discrim_ml')
+			discrim_iml = regDLF(cvt2imag(pl, maxVal=1.0), feat_iml, name='discrim_iml')
+			discrim_ml  = regDLF(cvt2imag(pl, maxVal=1.0), feat_ml, name='discrim_ml')
 			print discrim_im
 			print discrim_iml
 			print discrim_ml
@@ -769,21 +728,23 @@ class Model(GANModelDesc):
 			print rand_ml
 		self.g_loss = tf.reduce_sum([
 								#(recon_imi), # + recon_lmi + recon_imlmi), #
-								(recon_iml), # + recon_lml + recon_lmiml), #
-								(recon_im), #  + recon_lm + recon_mim + recon_mlm),
-								(recon_ml), #  + recon_lm + recon_mim + recon_mlm),
-								(rand_iml), # + rand_lml + rand_lmiml), #
-								(rand_ml), #  + rand_lm + rand_mim + rand_mlm),
+								# (recon_iml), # + recon_lml + recon_lmiml), #
+								# (recon_im), #  + recon_lm + recon_mim + recon_mlm),
+								# (recon_ml), #  + recon_lm + recon_mim + recon_mlm),
+								# (rand_iml), # + rand_lml + rand_lmiml), #
+								# (rand_ml), #  + rand_lm + rand_mim + rand_mlm),
 								# (G_loss_IL + G_loss_LI + G_loss_MI + G_loss_ML), 
-								(G_loss_LI + G_loss_MI), 
-								(0.1*discrim_im + discrim_iml + discrim_ml), 
-								(0.001*membr_im), # + membr_lm + membr_imlm + membr_lmim + membr_mlm + membr_mim),
+								(G_loss_IL + G_loss_MI), 
+								# 0.1*(discrim_im + discrim_iml + discrim_ml), 
+								0.001*(membr_im), # + membr_lm + membr_imlm + membr_lmim + membr_mlm + membr_mim),
+								0.001*(membr_iml), # + membr_lm + membr_imlm + membr_lmim + membr_mlm + membr_mim),
+								0.001*(membr_ml), # + membr_lm + membr_imlm + membr_lmim + membr_mlm + membr_mim),
 								# (label_iml + label_lml + label_lmiml + label_ml)
-								(label_iml + label_ml)
+								# (label_iml + label_ml)
 								], name='G_loss_total')
 		self.d_loss = tf.reduce_sum([
 								# (D_loss_IL + D_loss_LI + D_loss_MI + D_loss_ML), 
-								(D_loss_LI + D_loss_MI), 
+								(D_loss_IL + D_loss_MI), 
 								], name='D_loss_total')
 
 		wd_g = regularize_cost('gen/.*/W', 		l2_regularizer(1e-5), name='G_regularize')
@@ -807,6 +768,8 @@ class Model(GANModelDesc):
 			add_tensor_summary(rand_iml, 		types=['scalar'], name='rand_iml')
 			add_tensor_summary(rand_ml, 		types=['scalar'], name='rand_ml')
 			add_tensor_summary(membr_im, 		types=['scalar'], name='membr_im')
+			add_tensor_summary(membr_iml, 		types=['scalar'], name='membr_iml')
+			add_tensor_summary(membr_ml, 		types=['scalar'], name='membr_ml')
 			add_tensor_summary(discrim_im, 		types=['scalar'], name='discrim_im')
 			add_tensor_summary(discrim_iml,		types=['scalar'], name='discrim_iml')
 			add_tensor_summary(discrim_ml, 		types=['scalar'], name='discrim_ml')
@@ -816,9 +779,9 @@ class Model(GANModelDesc):
 			# )
 
 
-		viz = tf.concat([tf.concat([ui, pi, pim, piml, g_iml], 2), 
+		viz = tf.concat([tf.concat([ui, pi, sm, pim, piml, g_iml], 2), 
 						 # tf.concat([ul, pl, plm, plmi, plmim, plmiml], 2),
-						 tf.concat([um, pl, pm, pml, g_ml], 2),
+						 tf.concat([um, pl, ul, pm, pml, g_ml], 2),
 						 # tf.concat([pl, pl, g_iml, g_lml, g_lmiml,   g_ml], 2),
 						 ], 1)
 		# add_moving_summary(
@@ -842,7 +805,7 @@ class Model(GANModelDesc):
 class VisualizeRunner(Callback):
 	def _setup_graph(self):
 		self.pred = self.trainer.get_predictor(
-			['image_p', 'membr_p', 'label_p', 'image_u', 'membr_u', 'label_u'], ['viz'])
+			['image_p', 'membr_p', 'label_p', 'image_u', 'membr_u', 'label_u', 'seed_map'], ['viz'])
 
 	def _before_train(self):
 		global args

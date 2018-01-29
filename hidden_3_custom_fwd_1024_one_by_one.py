@@ -48,10 +48,10 @@ SHAPE = 256
 BATCH = 1
 TEST_BATCH = 100
 EPOCH_SIZE = 100
-NB_FILTERS = 32  # channel size
+NB_FILTERS = 12  # channel size
 
-DIMX  = 512
-DIMY  = 512
+DIMX  = 1024
+DIMY  = 1024
 DIMZ  = 3
 DIMC  = 1
 
@@ -267,6 +267,12 @@ class ImageDataFlow(RNGDataFlow):
 			# Cut 1 or 3 slices along z, by define DIMZ, the same for paired, randomly for unpaired
 			dimz, dimy, dimx = image_u.shape
 
+			seed = np.random.randint(0, 20152015)
+			seed_image = np.random.randint(0, 2015)
+			seed_membr = np.random.randint(0, 2015)
+			seed_label = np.random.randint(0, 2015)
+			np.random.seed(seed)
+
 			# The same for pair
 			randz = np.random.randint(0, dimz-DIMZ+1)
 			randy = np.random.randint(0, dimy-DIMY+1)
@@ -291,10 +297,6 @@ class ImageDataFlow(RNGDataFlow):
 			label_u = label_u[randz:randz+DIMZ,randy:randy+DIMY,randx:randx+DIMX]
 
 
-			seed = np.random.randint(0, 20152015)
-			seed_image = np.random.randint(0, 2015)
-			seed_membr = np.random.randint(0, 2015)
-			seed_label = np.random.randint(0, 2015)
 
 			if self.isTrain:
 				# Augment the pair image for same seed
@@ -769,14 +771,14 @@ class Model(GANModelDesc):
 			print rand_ml
 		self.g_loss = tf.reduce_sum([
 								#(recon_imi), # + recon_lmi + recon_imlmi), #
-								(recon_iml), # + recon_lml + recon_lmiml), #
-								(recon_im), #  + recon_lm + recon_mim + recon_mlm),
-								(recon_ml), #  + recon_lm + recon_mim + recon_mlm),
+								10*(recon_iml), # + recon_lml + recon_lmiml), #
+								10*(recon_im), #  + recon_lm + recon_mim + recon_mlm),
+								10*(recon_ml), #  + recon_lm + recon_mim + recon_mlm),
 								(rand_iml), # + rand_lml + rand_lmiml), #
 								(rand_ml), #  + rand_lm + rand_mim + rand_mlm),
 								# (G_loss_IL + G_loss_LI + G_loss_MI + G_loss_ML), 
 								(G_loss_LI + G_loss_MI), 
-								(0.1*discrim_im + discrim_iml + discrim_ml), 
+								(0.1*discrim_im + 10*discrim_iml + 10*discrim_ml), 
 								(0.001*membr_im), # + membr_lm + membr_imlm + membr_lmim + membr_mlm + membr_mim),
 								# (label_iml + label_lml + label_lmiml + label_ml)
 								(label_iml + label_ml)
@@ -876,6 +878,7 @@ def get_data(dataDir, isTrain=False, isValid=False, isTest=False):
 						  isTrain=isTrain, 
 						  isValid=isValid, 
 						  isTest =isTest)
+	dset.reset_state()
 	return dset
 ###############################################################################
 class ClipCallback(Callback):
@@ -923,7 +926,7 @@ if __name__ == '__main__':
 
 
 	data_set  = PrintData(data_set)
-	data_set  = PrefetchDataZMQ(data_set, 5)
+	data_set  = PrefetchDataZMQ(data_set, 8)
 	data_set  = QueueInput(data_set)
 	model 	  = Model()
 

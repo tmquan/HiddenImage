@@ -48,10 +48,10 @@ SHAPE = 256
 BATCH = 1
 TEST_BATCH = 100
 EPOCH_SIZE = 100
-NB_FILTERS = 32  # channel size
+NB_FILTERS = 12  # channel size
 
-DIMX  = 512
-DIMY  = 512
+DIMX  = 1024
+DIMY  = 1024
 DIMZ  = 3
 DIMC  = 1
 
@@ -267,6 +267,12 @@ class ImageDataFlow(RNGDataFlow):
 			# Cut 1 or 3 slices along z, by define DIMZ, the same for paired, randomly for unpaired
 			dimz, dimy, dimx = image_u.shape
 
+			seed = np.random.randint(0, 20152015)
+			seed_image = np.random.randint(0, 2015)
+			seed_membr = np.random.randint(0, 2015)
+			seed_label = np.random.randint(0, 2015)
+			np.random.seed(seed)
+
 			# The same for pair
 			randz = np.random.randint(0, dimz-DIMZ+1)
 			randy = np.random.randint(0, dimy-DIMY+1)
@@ -291,10 +297,6 @@ class ImageDataFlow(RNGDataFlow):
 			label_u = label_u[randz:randz+DIMZ,randy:randy+DIMY,randx:randx+DIMX]
 
 
-			seed = np.random.randint(0, 20152015)
-			seed_image = np.random.randint(0, 2015)
-			seed_membr = np.random.randint(0, 2015)
-			seed_label = np.random.randint(0, 2015)
 
 			if self.isTrain:
 				# Augment the pair image for same seed
@@ -342,6 +344,9 @@ class ImageDataFlow(RNGDataFlow):
 			membr_p = membrane(membr_p.copy())
 			membr_u = membrane(membr_u.copy())
 
+			# label_p = label_p[label_p>0] + 1.0
+			# label_u = label_u[label_u>0] + 1.0
+
 			# Calculate linear label
 			label_p, nb_labels_p = skimage.measure.label(label_p.copy(), return_num=True)
 			label_u, nb_labels_u = skimage.measure.label(label_u.copy(), return_num=True)
@@ -349,8 +354,11 @@ class ImageDataFlow(RNGDataFlow):
 			label_p = label_p.astype(np.float32)
 			label_u = label_u.astype(np.float32)
 
-			label_p = np_2tanh(label_p, maxVal=MAX_LABEL)
-			label_u = np_2tanh(label_u, maxVal=MAX_LABEL)
+			label_p = label_p / MAX_LABEL
+			label_u = label_u / MAX_LABEL
+
+			label_p[membr_p==0] = -1.0
+			label_u[membr_u==0] = -1.0
 
 			label_p = np_2imag(label_p, maxVal=255.0)
 			label_u = np_2imag(label_u, maxVal=255.0)
@@ -621,16 +629,23 @@ class Model(GANModelDesc):
 
 		with tf.name_scope('Recon_L_loss'):
 			# recon_lml 		= tf.reduce_mean(tf.abs((pl) - (plml)), name='recon_lml')
-			recon_iml 		= tf.reduce_mean(tf.abs((pl) - (piml)), name='recon_iml')
-			recon_ml 		= tf.reduce_mean(tf.abs((pl) - (pml)), name='recon_ml')
+			# recon_iml 		= tf.reduce_mean(tf.abs((pl) - (piml)), name='recon_iml')
+			# recon_ml 		= tf.reduce_mean(tf.abs((pl) - (pml)), name='recon_ml')
 			# recon_lmiml 	= tf.reduce_mean(tf.abs((pl) - (plmiml)), name='recon_lmiml') #
+			# recon_iml 		= tf.reduce_mean(tf.cast(tf.not_equal(pl, piml), tf.float32), name='recon_iml')
+			# recon_ml 		= tf.reduce_mean(tf.cast(tf.not_equal(pl, pml), tf.float32), name='recon_ml')
+			recon_ml 		= tf.reduce_mean(tf.abs(cvt2imag(pl, maxVal=MAX_LABEL) - cvt2imag(pml, maxVal=MAX_LABEL)), name='recon_ml')
+			recon_iml    	= tf.reduce_mean(tf.abs(cvt2imag(pl, maxVal=MAX_LABEL) - cvt2imag(piml, maxVal=MAX_LABEL)), name='recon_iml') #
+
 
 		with tf.name_scope('Recon_M_loss'):
 			# recon_mim 		= tf.reduce_mean(tf.abs((pm) - (pmim)), name='recon_mim')
 			# recon_mlm 		= tf.reduce_mean(tf.abs((pm) - (pmlm)), name='recon_mlm')
 
-			recon_im 		= tf.reduce_mean(tf.abs((pm) - (pim)), name='recon_im')
+			# recon_im 		= tf.reduce_mean(tf.abs((pm) - (pim)), name='recon_im')
 			# recon_lm 		= tf.reduce_mean(tf.abs((pm) - (plm)), name='recon_lm')
+			# recon_im 		= tf.reduce_mean(tf.cast(tf.not_equal(pm, pim), tf.float32), name='recon_im')
+			recon_im 		= tf.reduce_mean(tf.abs(cvt2imag(pm, maxVal=1.0) - cvt2imag(pim, maxVal=1.0)), name='recon_im')
 			
 		with tf.name_scope('GAN_loss'):
 			# G_loss_IL, D_loss_IL = self.build_losses(i_dis_real, i_dis_fake_from_label, name='IL')
@@ -687,7 +702,16 @@ class Model(GANModelDesc):
 					safe_norm 		= tf.sqrt(squared_norm+epsilon)
 					return tf.identity(safe_norm, name=name)
 				###
+
+
+				lins = tf.linspace(0.0, DIMZ*DIMY*DIMX, DIMZ*DIMY*DIMX, name='lins')
+				lins = lins / tf.reduce_max(lins) * 255
+				lins = cvt2tanh(lins)
+				lins = tf.reshape(lins, tf.shape(y_true), name='lins_3d')
+				print lins
+
 				y_true = tf.reshape(y_true, [DIMZ*DIMY*DIMX])
+				y_pred = tf.concat([y_pred, lins], axis=-1)
 
 				nDim = tf.shape(y_pred)[-1]
 				X = tf.reshape(y_pred, [DIMZ*DIMY*DIMX, nDim])
@@ -769,14 +793,14 @@ class Model(GANModelDesc):
 			print rand_ml
 		self.g_loss = tf.reduce_sum([
 								#(recon_imi), # + recon_lmi + recon_imlmi), #
-								(recon_iml), # + recon_lml + recon_lmiml), #
-								(recon_im), #  + recon_lm + recon_mim + recon_mlm),
-								(recon_ml), #  + recon_lm + recon_mim + recon_mlm),
+								10*(recon_iml), # + recon_lml + recon_lmiml), #
+								10*(recon_im), #  + recon_lm + recon_mim + recon_mlm),
+								10*(recon_ml), #  + recon_lm + recon_mim + recon_mlm),
 								(rand_iml), # + rand_lml + rand_lmiml), #
 								(rand_ml), #  + rand_lm + rand_mim + rand_mlm),
 								# (G_loss_IL + G_loss_LI + G_loss_MI + G_loss_ML), 
 								(G_loss_LI + G_loss_MI), 
-								(0.1*discrim_im + discrim_iml + discrim_ml), 
+								(0.1*discrim_im + 10*discrim_iml + 10*discrim_ml), 
 								(0.001*membr_im), # + membr_lm + membr_imlm + membr_lmim + membr_mlm + membr_mim),
 								# (label_iml + label_lml + label_lmiml + label_ml)
 								(label_iml + label_ml)
@@ -876,6 +900,7 @@ def get_data(dataDir, isTrain=False, isValid=False, isTest=False):
 						  isTrain=isTrain, 
 						  isValid=isValid, 
 						  isTest =isTest)
+	dset.reset_state()
 	return dset
 ###############################################################################
 class ClipCallback(Callback):
@@ -923,7 +948,7 @@ if __name__ == '__main__':
 
 
 	data_set  = PrintData(data_set)
-	data_set  = PrefetchDataZMQ(data_set, 5)
+	data_set  = PrefetchDataZMQ(data_set, 8)
 	data_set  = QueueInput(data_set)
 	model 	  = Model()
 
