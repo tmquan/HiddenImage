@@ -543,9 +543,18 @@ class Model(GANModelDesc):
 			with G.gradient_override_map({"Round": "Identity"}):
 				with freeze_variables():
 					with tf.name_scope(name=name):
-						label = cvt2imag(label, maxVal=factor)
+						# label = cvt2imag(label, maxVal=factor)
+						# label = tf.round(label)
+						# label = cvt2tanh(label, maxVal=factor)
+						# cvt from -1 ~ 1 to 0 255
+						# label = cvt2imag(label, maxVal=255.0)
+						cond0 = tf.equal(label, -1.0*tf.ones_like(label))
+						label = tf.where(cond0, tf.zeros_like(label), label, name='removedBackground') # From -1 to 0
+						label = label * factor # From 0~1 to 0~MAXLABEL
 						label = tf.round(label)
-						label = cvt2tanh(label, maxVal=factor)
+						label = label / factor # From 0~MAXLABEL to 0~1
+						cond1 = tf.equal(label, 0.0*tf.zeros_like(label))
+						label = tf.where(cond1, -1.0*tf.ones_like(label), label, name='addedBackground') # From -1 to 0
 					return tf.identity(label, name=name)
 
 
